@@ -1,65 +1,52 @@
 #include <zephyr/kernel.h>
-#include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/net_event.h>
-#include <zephyr/net/net_if.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/printk.h>
 #include <stdio.h>
 
-// Configura tus credenciales Wi-Fi
-#define WIFI_SSID "Redmi Note 13"
-#define WIFI_PASS "890890890"
 
-// LED conectado al alias led0
-#define LED_NODE DT_ALIAS(led0)
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED_NODE, gpios);
+#define STACK_SIZE 1024
+#define PRIORITY 5
 
-// Semáforo para esperar IP
-static struct k_sem ip_ready;
+// Definicion de stacks para los hilos
+K_THREAD_STACK_DEFINE(stack_par, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stack_impar, STACK_SIZE);
 
-static void wifi_handler(struct net_mgmt_event_callback *cb,
-                         uint32_t event, struct net_if *iface)
-{
-	if (event == NET_EVENT_IPV4_ADDR_ADD) {
-		char ip[NET_IPV4_ADDR_LEN];
-		net_addr_ntop(AF_INET,
-		              &iface->config.ip.ipv4->unicast[0].address.in_addr,
-		              ip, sizeof(ip));
-		printf("IP obtenida: %s\n", ip);
-		gpio_pin_set_dt(&led, 1);  // Enciende LED
-		k_sem_give(&ip_ready);     // Señala que IP está lista
+// Definicion de estructuras de control para los hilos
+static struct k_thread thread_par;
+static struct k_thread thread_impar;
+
+// Funcion para imprimir numeros pares 
+void par_thread(void *arg1, void *arg2, void *arg3){
+	int num = 0;
+	while(1){
+		if(num % 2 == 0){
+			printk("Par: %d\n", num);
+		}
+		num++;
+		k_msleep(500);
 	}
 }
 
-void main(void)
-{
-	struct net_if *iface = net_if_get_default();
-
-	// Inicializa LED
-	gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
-
-	// Prepara evento para IP
-	static struct net_mgmt_event_callback cb;
-	k_sem_init(&ip_ready, 0, 1);
-	net_mgmt_init_event_callback(&cb, wifi_handler, NET_EVENT_IPV4_ADDR_ADD);
-	net_mgmt_add_event_callback(&cb);
-
-	// Conexión Wi-Fi
-	struct wifi_connect_req_params params = {
-		.ssid = WIFI_SSID,
-		.ssid_length = strlen(WIFI_SSID),
-		.psk = WIFI_PASS,
-		.psk_length = strlen(WIFI_PASS),
-		.security = WIFI_SECURITY_TYPE_PSK,
-	};
-	printf("Conectando a Wi-Fi...\n");
-	net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params));
-
-	// Espera hasta obtener IP (máx 10 segundos)
-	if (k_sem_take(&ip_ready, K_SECONDS(10)) == 0) {
-		printf("¡Conectado con éxito!\n");
-	} else {
-		printf("Error: no se obtuvo IP.\n");
+void impar_thread(void *arg1, void *arg2, void *arg3){
+	int num = 1;
+	while(1){
+		if(num % 2 != 0){
+			printk("IMpar: %d\n", num);
+		}
+		num++;
+		k_msleep(500);
 	}
 }
 
+int main(void){
+	printk("Inicio del programa con dos hilos\n");
+
+	// Crear hilo para numeros pares
+	k_thread_create(&thread_par, stack_par, STACK_SIZE,
+									par_thread, NULL, NULL, NULL,
+									PRIORITY, 0, K_NO_WAIT);
+
+	// Crear hilo para numeros impares
+	k_thread_create(&thread_impar, stack_impar, STACK_SIZE,
+									impar_thread, NULL, NULL, NULL,
+									PRIORITY, 0, K_NO_WAIT);
+}
